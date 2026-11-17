@@ -73,3 +73,5 @@ body a:focus-visible,body button:focus-visible,body input:focus-visible,body tex
 .dd-admin-tabs a[aria-current="page"]{background:#9d55db;color:#fff!important;border-color:#c084fc}
 .dd-admin-tabs a:hover{border-color:#d7a5ff}
 @media(max-width:520px){.dd-admin-tabs a{flex:1;padding:12px 10px}}
+
+.dd-admin-top{max-width:1160px;margin:0 auto;padding:22px 24px 0}.dd-admin-top .dd-admin-tabs{margin:0;padding:0 0 18px}.dd-admin-top .dd-admin-tabs a{min-width:180px}@media(max-width:520px){.dd-admin-top{padding:18px 20px 0}.dd-admin-top .dd-admin-tabs a{min-width:0}}
