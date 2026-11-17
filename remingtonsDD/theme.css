@@ -66,3 +66,10 @@ body a:focus-visible,body button:focus-visible,body input:focus-visible,body tex
  .dd-header .dd-brand{font-size:16px!important}
  body>main{padding-left:20px!important;padding-right:20px!important}
 }
+
+/* Private admin section tabs */
+.dd-admin-tabs{display:flex;gap:10px;flex-wrap:wrap;margin:0 0 26px;padding-bottom:15px;border-bottom:1px solid #503369}
+.dd-admin-tabs a{display:inline-flex;align-items:center;justify-content:center;padding:12px 20px;border-radius:10px;border:1px solid #78509a;background:#20142d;color:#e8d7f6!important;text-decoration:none!important;font-size:14px;font-weight:800}
+.dd-admin-tabs a[aria-current="page"]{background:#9d55db;color:#fff!important;border-color:#c084fc}
+.dd-admin-tabs a:hover{border-color:#d7a5ff}
+@media(max-width:520px){.dd-admin-tabs a{flex:1;padding:12px 10px}}
