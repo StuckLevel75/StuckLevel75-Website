@@ -15,7 +15,7 @@
       <form id="login-form"><label for="email">Email</label><input id="email" type="email" autocomplete="username" required><label for="password">Password</label><input id="password" type="password" autocomplete="current-password" required><p><button type="submit" id="login-button">Sign in</button></p></form>
       <p id="login-status" role="status"></p>
     </section>
-    <section id="dashboard" class="hidden">
+    <section id="dashboard" class="hidden"><nav class="dd-admin-tabs" aria-label="Admin sections"><a href="/remingtonsDD/Admin/">Job Applications</a><a href="/remingtonsDD/Admin/Partnerships/" aria-current="page">Partnerships</a></nav>
       <div class="inbox-top"><div><p class="eyebrow">DIGITAL DEN • MANAGEMENT</p><h1>Partnership inbox</h1><p class="muted">Business contacts and partnership enquiries.</p></div><button id="logout" type="button">Sign out</button></div>
       <div class="filters"><label for="filter">Show</label><select id="filter"><option value="all">All enquiries</option><option value="new">New</option><option value="contacted">Contacted</option><option value="closed">Closed</option></select></div>
       <p id="inbox-status" role="status">Loading enquiries…</p><div id="inquiry-list"></div>
