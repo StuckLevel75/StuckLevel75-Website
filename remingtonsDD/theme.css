@@ -1,17 +1,68 @@
-/* Shared Remington's Digital Den design — all business pages */
-:root{--dd-bg:#090711;--dd-purple:#c084fc;--dd-text:#f7f1ff;--dd-muted:#c5b5d2;--dd-border:#503369}
+/* Remington's Digital Den — shared visual system across every page */
+:root{
+ color-scheme:dark;
+ --dd-bg:#090711;--dd-surface:#171020;--dd-surface-raised:#21142e;
+ --dd-purple:#c084fc;--dd-purple-strong:#9d55db;
+ --dd-text:#f7f1ff;--dd-muted:#c5b5d2;--dd-border:#503369;
+ --accent:var(--dd-purple);--border:var(--dd-border);
+}
+*{box-sizing:border-box}
 html{scroll-behavior:smooth}
-body{background:#090711!important;background-image:radial-gradient(ellipse at 85% 0%,#42216370,transparent 50%)!important;color:var(--dd-text)!important;min-height:100vh;font-family:Inter,Arial,sans-serif}
-body>header.dd-header{max-width:none!important;width:100%;margin:0!important;padding:0!important;background:#0d0916e8!important;border:0!important;border-bottom:1px solid #4a315e!important;display:block!important}
+body{
+ margin:0!important;min-height:100vh;color:var(--dd-text)!important;
+ background-color:var(--dd-bg)!important;
+ background-image:radial-gradient(ellipse at 85% 0%,#42216370,transparent 50%)!important;
+ font-family:Inter,Arial,sans-serif!important;font-size:16px;line-height:1.6;
+}
+body>header.dd-header{
+ max-width:none!important;width:100%;margin:0!important;padding:0!important;
+ display:block!important;background:#0d0916e8!important;border:0!important;
+ border-bottom:1px solid #4a315e!important;
+}
 .dd-header .dd-inner{max-width:1160px;margin:auto;padding:20px 24px;display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap}
 .dd-header .dd-brand{font-size:18px!important;font-weight:900!important;letter-spacing:.08em!important;color:#fff!important;text-decoration:none!important;line-height:1.3!important}
 .dd-header .dd-brand span{display:inline!important;font-size:inherit!important;color:var(--dd-purple)!important;letter-spacing:inherit!important}
 .dd-header .dd-nav{display:flex!important;align-items:center;gap:20px;flex-wrap:wrap}
-.dd-header .dd-nav a{font-size:14px!important;font-weight:700!important;color:#f7f1ff!important;text-decoration:none!important;white-space:nowrap}
+.dd-header .dd-nav a{font-size:14px!important;font-weight:700!important;color:var(--dd-text)!important;text-decoration:none!important;white-space:nowrap}
 .dd-header .dd-nav a:hover,.dd-header .dd-nav a[aria-current=page]{color:#d7a5ff!important}
 .dd-header .dd-nav .dd-staff{border:1px solid #7e4e9e;border-radius:9px;padding:10px 14px;background:#281638;color:#fff!important}
-body>main{width:100%;max-width:1160px!important;margin-left:auto!important;margin-right:auto!important}
-body>footer.dd-footer{max-width:none!important;width:100%;border-top:1px solid #3b294b!important;background:transparent!important;padding:25px!important;text-align:center;color:#a797b6!important;font-size:13px}
-body .hero,body .form-card,body .panel,body .application,body .inquiry{border-color:#503369}
+body>main{width:100%;max-width:1160px!important;margin-left:auto!important;margin-right:auto!important;padding-left:24px!important;padding-right:24px!important}
+body>main h1{font-weight:800;letter-spacing:-.04em;color:var(--dd-text)}
+body>main h2{color:var(--dd-text)}
+body>main .eyebrow,body>main .label,body>main .small-label{color:#d7a5ff!important;letter-spacing:.15em;font-weight:800}
+body>main .muted,body>main .lead,body>main .form-intro{color:var(--dd-muted)!important}
+body:has(#application-form)>main .hero{background:linear-gradient(125deg,#352146,#15101d)!important;border:1px solid var(--dd-border)!important;border-radius:16px;box-shadow:none!important}
+body>main .form-card,body>main .panel,body>main .application,body>main .inquiry,body>main .tile,body>main .stat{
+ background:linear-gradient(145deg,#251635,#130d1d)!important;
+ border:1px solid var(--dd-border)!important;border-radius:15px!important;
+ box-shadow:none!important;color:var(--dd-text);
+}
+body>main .product,body>main .contact-note{border-color:var(--dd-border)!important}
+body>main .product{background:var(--dd-surface-raised)!important;color:var(--dd-text)!important}
+body>main input,body>main textarea,body>main select{
+ background:#100c17!important;border:1px solid #674385!important;color:#fff!important;
+ border-radius:9px!important;padding:12px!important;font:inherit;
+}
+body>main input::placeholder,body>main textarea::placeholder{color:#a795b8}
+body>main button:not(.secondary):not(.business-tab):not(.tab-button),body>main .button:not(.alt){
+ background:var(--dd-purple-strong)!important;color:#fff!important;
+ border:1px solid #b77deb!important;border-radius:9px!important;
+ font-weight:800!important;
+}
+body>main button:hover,body>main .button:hover{filter:brightness(1.12)}
+body>main .business-tab,body>main .tab-button{background:#20142d!important;border:1px solid #78509a!important;color:#e8d7f6!important}
+body>main .business-tab[aria-selected=true],body>main .tab-button.active{background:#9d55db!important;color:#fff!important}
+body>main a:not(.button){text-underline-offset:4px}
+body>footer.dd-footer{
+ max-width:none!important;width:100%;margin:0!important;
+ border:0!important;border-top:1px solid #3b294b!important;
+ background:transparent!important;padding:25px!important;
+ text-align:center!important;color:#a797b6!important;font-size:13px!important;
+}
 body a:focus-visible,body button:focus-visible,body input:focus-visible,body textarea:focus-visible{outline:2px solid #d7a5ff;outline-offset:3px}
-@media(max-width:700px){.dd-header .dd-inner{align-items:flex-start}.dd-header .dd-nav{gap:13px}.dd-header .dd-brand{font-size:16px!important}}
+@media(max-width:700px){
+ .dd-header .dd-inner{align-items:flex-start;padding:18px 20px}
+ .dd-header .dd-nav{gap:13px}
+ .dd-header .dd-brand{font-size:16px!important}
+ body>main{padding-left:20px!important;padding-right:20px!important}
+}
