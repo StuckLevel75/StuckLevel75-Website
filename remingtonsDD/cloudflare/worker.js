@@ -277,11 +277,11 @@ async function restockInteraction(request,env) {
    if(record.status==="restocked"||record.status==="denied"||record.status==="approved"&&action!=="restocked")return restockReply(restockMessage("This request has already been handled."));
    if(action==="restocked"&&record.status!=="approved")return restockReply(restockMessage("Approve the request first."));
    const next={...record,status:action,handledBy:restockUser(i),updatedAt:new Date().toISOString()};
-   if(action==="restocked"){
-    // Remove the fulfilled request from Discord; retain a completed record in Firestore.
+   if(action==="restocked"||action==="denied"){
+    // Remove completed or denied requests from Discord; retain their status in Firestore.
     await discordAnnouncement(env,"restock",record.messageId,"DELETE");
     await restockFirestore(env,requestId,"PATCH",next);
-    return restockReply(restockMessage("Restock fulfilled. Request removed from the channel."));
+    return restockReply(restockMessage(action==="denied"?"Request denied and removed from the channel.":"Restock fulfilled. Request removed from the channel."));
    }
    await restockFirestore(env,requestId,"PATCH",next);
    return restockReply({type:7,data:{embeds:restockEmbed(next),components:restockButtons(requestId,action),allowed_mentions:{parse:[]}}});
