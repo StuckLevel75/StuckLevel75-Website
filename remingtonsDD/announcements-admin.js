@@ -74,14 +74,14 @@ async function save(action){
 }
 $('login-form').addEventListener('submit',async e=>{e.preventDefault();$('login-status').textContent='Signing in…';try{await signInWithEmailAndPassword(auth,$('email').value.trim(),$('password').value)}catch{$('login-status').textContent='Sign-in failed. Check your credentials.'}});
 $('restock-panel').onclick=async()=>{
- if(!confirm('Post a Request Restock button in Private Staff Updates?'))return;
+ if(!confirm('Post a Request Restock button in the Restock channel?'))return;
  const button=$('restock-panel');button.disabled=true;$('restock-status').textContent='Posting…';
  try{
   const user=auth.currentUser;if(!user||user.uid!==adminUid)throw Error('Administrator access required');
   const token=await user.getIdToken();
   const response=await fetch('https://digital-den-auth.dburghagen.workers.dev/admin/restock-panel',{method:'POST',headers:{Authorization:'Bearer '+token}});
   const data=await response.json();if(!response.ok)throw Error(data.error||'Could not post button');
-  $('restock-status').textContent='Restock button posted in Staff Updates.';
+  $('restock-status').textContent='Restock button posted in the Restock channel.';
  }catch(e){$('restock-status').textContent=e.message}finally{button.disabled=false}
 };
 $('logout').onclick=()=>signOut(auth);
