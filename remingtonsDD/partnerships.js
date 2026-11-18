@@ -1,52 +1,55 @@
-import { initializeApp, getApps, getApp } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js';
-import { getAuth, signInAnonymously } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js';
-import { getFirestore, doc, setDoc, serverTimestamp } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js';
-import { firebaseConfig } from '/firebase-config.js';
-
 const $ = id => document.getElementById(id);
 const form = $('partnership-form'), status = $('contact-status'), send = $('send-inquiry');
-const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
-const auth = getAuth(app), db = getFirestore(app);
-let submitting = false;
-
+const worker = 'https://digital-den-auth.dburghagen.workers.dev';
+let token = sessionStorage.getItem('dd_contact_token') || '';
+const params = new URLSearchParams(location.hash.slice(1));
+if (params.has('dd_token')) {
+  token = params.get('dd_token') || '';
+  sessionStorage.setItem('dd_contact_token', token);
+  history.replaceState(null, '', location.pathname + location.search);
+}
+if (location.hash === '#discord-not-member') {
+  token = '';
+  sessionStorage.removeItem('dd_contact_token');
+  history.replaceState(null, '', location.pathname + location.search);
+  $('discord-verify-status').textContent = 'Join our Discord server, then verify again.';
+}
+function refresh() {
+  send.disabled = !token;
+  if (token) $('discord-verify-status').textContent = 'Discord verified. You can send your enquiry.';
+}
+refresh();
 form.addEventListener('submit', async event => {
   event.preventDefault();
-  if (submitting || $('contact-website').value) return;
-  const data = {
-    businessId: 'digital-den',
+  if (!token || $('contact-website').value) return;
+  const inquiry = {
     businessName: $('business-name').value.trim(),
     contactName: $('contact-name').value.trim(),
     discord: $('discord-contact').value.trim(),
-    message: $('partnership-message').value.trim(),
-    status: 'new'
+    message: $('partnership-message').value.trim()
   };
-  const limits = [['businessName',2,120], ['contactName',2,80], ['discord',2,120], ['message',10,2000]];
-  if (!form.reportValidity() || limits.some(([key,min,max]) => data[key].length < min || data[key].length > max)) {
-    status.textContent = 'Please complete each field. Your message needs at least 10 characters.';
-    return;
-  }
-  submitting = true;
+  if (!form.reportValidity()) return;
   send.disabled = true;
   status.textContent = 'Sending your enquiry…';
   try {
-    await auth.authStateReady();
-    const user = auth.currentUser || (await signInAnonymously(auth)).user;
-    await setDoc(doc(db, 'partnershipInquiries', 'digital-den_' + user.uid), {
-      ...data, senderUid: user.uid, createdAt: serverTimestamp()
+    const response = await fetch(worker + '/contact', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({token, inquiry})
     });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Could not send enquiry');
     form.reset();
-    status.textContent = 'Message sent. Management will follow up with you on Discord.';
-    // One contact submission per Firebase identity. Keep the form locked after success.
+    token = '';
+    sessionStorage.removeItem('dd_contact_token');
     send.textContent = 'Enquiry sent';
+    status.textContent = 'Message sent. Management will follow up with you on Discord.';
   } catch (error) {
-    submitting = false;
-    send.disabled = false;
-    status.textContent = error.code === 'permission-denied'
-      ? 'Unable to send. If you already submitted from this browser, contact staff on Discord for follow-up.'
-      : 'Your message could not be sent. Please try again shortly.';
+    status.textContent = error.message || 'Could not send enquiry. Try again.';
+    if (/expired/i.test(status.textContent)) {
+      token = '';
+      sessionStorage.removeItem('dd_contact_token');
+    }
+    refresh();
   }
 });
-
-// Keep the form unavailable if Firebase modules fail to load.
-send.disabled = false;
-status.textContent = "";

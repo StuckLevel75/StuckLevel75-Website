@@ -73,21 +73,57 @@ function validate(d) {
   for(const [key,[min,max]] of Object.entries(limits))if(typeof d[key]!=="string"||d[key].trim().length<min||d[key].length>max)return false;
   return Array.isArray(d.extraAnswers)&&d.extraAnswers.length<=8&&d.extraAnswers.every(a=>a&&typeof a.question==="string"&&a.question.length<=200&&typeof a.answer==="string"&&a.answer.length<=1200);
 }
+// Assign the purpose role and, when configured, the default Member role.
+// Discord requires the bot to have Manage Roles and sit above each target role.
+async function assignDiscordRoles(env,discordId,purpose) {
+  if(!env.DISCORD_BOT_TOKEN)throw Error("DISCORD_BOT_TOKEN is not configured");
+  const purposeRole=purpose==="contact"?"1572468132562337803":"1572467945097920664";
+  const roles=["1572372330707947791",purposeRole];
+  for(const roleId of new Set(roles)) {
+    const response=await fetch(`https://discord.com/api/v10/guilds/${env.DISCORD_GUILD_ID}/members/${discordId}/roles/${roleId}`,{
+      method:"PUT",headers:{Authorization:"Bot "+env.DISCORD_BOT_TOKEN}
+    });
+    if(!response.ok)throw Error("Discord role assignment failed for role "+roleId+" (HTTP "+response.status+")");
+  }
+}
+function validateInquiry(d) {
+  return d && typeof d==="object" && [["businessName",2,120],["contactName",2,80],["discord",2,120],["message",10,2000]].every(([key,min,max])=>typeof d[key]==="string"&&d[key].trim().length>=min&&d[key].length<=max);
+}
+async function submitInquiry(env,payload,data) {
+  const access=await firebaseToken(env);
+  const root="https://firestore.googleapis.com/v1/projects/stucklevel75/databases/(default)/documents";
+  const fields=Object.fromEntries(Object.entries({
+    businessId:"digital-den",senderUid:"discord:"+payload.discordId,
+    discordId:payload.discordId,discordUsername:payload.username||"",
+    businessName:data.businessName,contactName:data.contactName,
+    discord:data.discord,message:data.message,status:"new"
+  }).map(([k,v])=>[k,fv(v)]));
+  fields.createdAt={timestampValue:new Date().toISOString()};
+  const response=await fetch(root+"/partnershipInquiries?documentId="+encodeURIComponent("digital-den_discord_"+payload.discordId),{
+    method:"POST",headers:{Authorization:"Bearer "+access,"Content-Type":"application/json"},body:JSON.stringify({fields})
+  });
+  if(response.status===409)return {error:"You have already sent an enquiry. Contact staff on Discord for follow-up.",status:409};
+  if(!response.ok)throw Error("Firestore enquiry creation failed");
+  return {ok:true};
+}
 export default {
  async fetch(request,env) {
   const url=new URL(request.url),origin=request.headers.get("Origin");
   const cors={"Access-Control-Allow-Origin":ORIGIN,"Vary":"Origin","Access-Control-Allow-Methods":"POST, OPTIONS","Access-Control-Allow-Headers":"Content-Type"};
-  if(url.pathname==="/submit"&&request.method==="OPTIONS")return new Response(null,{status:204,headers:cors});
+  if(["/submit","/contact"].includes(url.pathname)&&request.method==="OPTIONS")return new Response(null,{status:204,headers:cors});
   if(url.pathname==="/")return new Response("Digital Den Discord verification service is running.");
   if(!env.DISCORD_CLIENT_ID||!env.DISCORD_CLIENT_SECRET||!env.DISCORD_GUILD_ID||!env.SESSION_SIGNING_SECRET||!env.FIREBASE_SERVICE_ACCOUNT)return json({error:"Service not configured"},503);
   if(url.pathname==="/login"&&request.method==="GET") {
     const state=crypto.randomUUID();
+    const purpose=url.searchParams.get("purpose")==="contact"?"contact":"apply";
     const params=new URLSearchParams({client_id:env.DISCORD_CLIENT_ID,redirect_uri:CALLBACK,response_type:"code",scope:"identify guilds.members.read",state});
-    return redirect("https://discord.com/oauth2/authorize?"+params,cookie("dd_oauth_state",state));
+    return new Response(null,{status:302,headers:{Location:"https://discord.com/oauth2/authorize?"+params,"Cache-Control":"no-store","Set-Cookie":cookie("dd_oauth_state",state+"."+purpose)}});
   }
   if(url.pathname==="/callback"&&request.method==="GET") {
     const state=url.searchParams.get("state"),saved=cookieValue(request,"dd_oauth_state");
-    if(!state||!saved||state!==saved||!url.searchParams.get("code"))return new Response("Invalid or expired Discord sign-in. Please start again.",{status:403});
+    if(!state||!saved||!saved.startsWith(state+".")||!url.searchParams.get("code"))return new Response("Invalid or expired Discord sign-in. Please start again.",{status:403});
+    const purpose=saved.endsWith(".contact")?"contact":"apply";
+    const returnPath=purpose==="contact"?"/remingtonsDD/Partnerships/":"/remingtonsDD/Apply/";
     const tokenResponse=await fetch("https://discord.com/api/v10/oauth2/token",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams({client_id:env.DISCORD_CLIENT_ID,client_secret:env.DISCORD_CLIENT_SECRET,grant_type:"authorization_code",code:url.searchParams.get("code"),redirect_uri:CALLBACK})});
     if(!tokenResponse.ok)return new Response("Discord sign-in failed. Try again.",{status:502});
     const token=await tokenResponse.json();
@@ -96,10 +132,23 @@ export default {
       fetch("https://discord.com/api/v10/users/@me",{headers:authHeader}),
       fetch(`https://discord.com/api/v10/users/@me/guilds/${env.DISCORD_GUILD_ID}/member`,{headers:authHeader})
     ]);
-    if(!userResp.ok||!memberResp.ok)return redirect(ORIGIN+"/remingtonsDD/Apply/#discord-not-member",cookie("dd_oauth_state","",0));
+    if(!userResp.ok||!memberResp.ok)return redirect(ORIGIN+returnPath+"#discord-not-member",cookie("dd_oauth_state","",0));
     const user=await userResp.json();
+    try {await assignDiscordRoles(env,user.id,purpose)}catch(e){console.error(e.message);return new Response("Discord verification succeeded, but we could not assign your server roles. Please contact staff.",{status:502});}
     const signed=await signPayload(env.SESSION_SIGNING_SECRET,{aud:"dd-apply",discordId:user.id,username:user.username,exp:Date.now()+10*60*1000});
-    return redirect(ORIGIN+"/remingtonsDD/Apply/#dd_token="+encodeURIComponent(signed),cookie("dd_oauth_state","",0));
+    return redirect(ORIGIN+returnPath+"#dd_token="+encodeURIComponent(signed),cookie("dd_oauth_state","",0));
+  }
+  if(url.pathname==="/contact"&&request.method==="POST") {
+    if(origin!==ORIGIN)return json({error:"Invalid origin"},403,cors);
+    if(Number(request.headers.get("Content-Length")||0)>12000)return json({error:"Enquiry too large"},413,cors);
+    try {
+      const body=await request.json();
+      const payload=await readPayload(env.SESSION_SIGNING_SECRET,body.token);
+      if(!payload)return json({error:"Discord verification expired. Verify again."},403,cors);
+      if(!validateInquiry(body.inquiry))return json({error:"Complete all required fields."},400,cors);
+      const result=await submitInquiry(env,payload,body.inquiry);
+      return json(result,result.status||200,cors);
+    } catch(e) {console.error("Enquiry failed",e.message);return json({error:"Unable to send enquiry. Please try again."},500,cors);}
   }
   if(url.pathname==="/submit"&&request.method==="POST") {
     if(origin!==ORIGIN)return json({error:"Invalid origin"},403,cors);
