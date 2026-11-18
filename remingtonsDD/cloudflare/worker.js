@@ -149,7 +149,7 @@ async function botDiagnostics(env) {
   return {ok:checks.every(r=>r.assignable),botName:bot.username,manageRoles:manage,roles:checks};
 }
 
-const ANNOUNCEMENT_CHANNELS={public:"1572372341806338219",staff:"1572372383161909290"};
+const ANNOUNCEMENT_CHANNELS={public:"1572372341806338219",staff:"1572372383161909290",restock:"1572372357748891648"};
 const ANNOUNCEMENT_COLLECTION="digitalDenAnnouncements";
 const firestoreRoot="https://firestore.googleapis.com/v1/projects/stucklevel75/databases/(default)/documents";
 const fieldValue=value=>typeof value==="string"?{stringValue:value}:typeof value==="boolean"?{booleanValue:value}:{nullValue:null};
@@ -210,7 +210,7 @@ async function handleAnnouncement(env,request) {
 }
 
 
-const RESTOCK_CHANNEL="1572372383161909290";
+const RESTOCK_CHANNEL="1572372357748891648";
 const RESTOCK_MANAGER_ROLE="1572372322092974154";
 const RESTOCK_COLLECTION="digitalDenRestockRequests";
 const restockReply=(data,status=200)=>json(data,status);
@@ -249,7 +249,7 @@ async function restockInteraction(request,env) {
  if(!await verifyDiscordInteraction(request,env,raw))return new Response("Invalid request signature",{status:401});
  let i;try{i=JSON.parse(raw)}catch{return new Response("Invalid JSON",{status:400})}
  if(i.type===1)return restockReply({type:1});
- if(i.guild_id!==env.DISCORD_GUILD_ID||i.channel_id!==RESTOCK_CHANNEL)return restockReply(restockMessage("This feature is only available in Staff Updates."));
+ if(i.guild_id!==env.DISCORD_GUILD_ID||i.channel_id!==RESTOCK_CHANNEL)return restockReply(restockMessage("This feature is only available in the Restock channel."));
  const id=i.data?.custom_id||"";
  if(i.type===3&&id==="restock:open"){
   return restockReply({type:9,data:{custom_id:"restock:submit",title:"Request Restock",components:[{type:1,components:[{type:4,custom_id:"item",label:"Item to restock",style:1,min_length:1,max_length:120,required:true,placeholder:"e.g. Laptops"}]}]}});
@@ -259,7 +259,7 @@ async function restockInteraction(request,env) {
   if(!item||item.length>120)return restockReply(restockMessage("Enter a valid item name."));
   const requester=restockUser(i),requestId=crypto.randomUUID(),record={item,requester,status:"pending",createdAt:new Date().toISOString(),messageId:""};
   try {
-   const message=await discordAnnouncement(env,"staff","","POST",{embeds:restockEmbed(record),components:restockButtons(requestId,"pending"),allowed_mentions:{parse:[]}});
+   const message=await discordAnnouncement(env,"restock","","POST",{embeds:restockEmbed(record),components:restockButtons(requestId,"pending"),allowed_mentions:{parse:[]}});
    record.messageId=message.id;
    await restockFirestore(env,requestId,"PATCH",record);
    return restockReply(restockMessage("Restock request submitted."));
@@ -277,6 +277,12 @@ async function restockInteraction(request,env) {
    if(record.status==="restocked"||record.status==="denied"||record.status==="approved"&&action!=="restocked")return restockReply(restockMessage("This request has already been handled."));
    if(action==="restocked"&&record.status!=="approved")return restockReply(restockMessage("Approve the request first."));
    const next={...record,status:action,handledBy:restockUser(i),updatedAt:new Date().toISOString()};
+   if(action==="restocked"){
+    // Remove the fulfilled request from Discord; retain a completed record in Firestore.
+    await discordAnnouncement(env,"restock",record.messageId,"DELETE");
+    await restockFirestore(env,requestId,"PATCH",next);
+    return restockReply(restockMessage("Restock fulfilled. Request removed from the channel."));
+   }
    await restockFirestore(env,requestId,"PATCH",next);
    return restockReply({type:7,data:{embeds:restockEmbed(next),components:restockButtons(requestId,action),allowed_mentions:{parse:[]}}});
   }catch(e){console.error("Restock update",e.message);return restockReply(restockMessage("Could not update this request. Try again."))}
@@ -284,7 +290,7 @@ async function restockInteraction(request,env) {
  return restockReply(restockMessage("Unknown restock action."));
 }
 async function postRestockPanel(env) {
- const result=await discordAnnouncement(env,"staff","","POST",{embeds:[{title:"Staff Restock Requests",description:"Need something restocked? Click the button below and enter the item name.",color:0x9d55db}],components:[{type:1,components:[{type:2,style:1,label:"Request Restock",custom_id:"restock:open",emoji:{name:"📦"}}]}],allowed_mentions:{parse:[]}});
+ const result=await discordAnnouncement(env,"restock","","POST",{embeds:[{title:"Staff Restock Requests",description:"Need something restocked? Click the button below and enter the item name.",color:0x9d55db}],components:[{type:1,components:[{type:2,style:1,label:"Request Restock",custom_id:"restock:open",emoji:{name:"📦"}}]}],allowed_mentions:{parse:[]}});
  return {ok:true,messageId:result.id};
 }
 
