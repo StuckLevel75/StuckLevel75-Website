@@ -166,7 +166,8 @@ async function discordAnnouncement(env,channel,id,method,body) {
  const response=await fetch("https://discord.com/api/v10/channels/"+ANNOUNCEMENT_CHANNELS[channel]+"/messages"+(id?"/"+encodeURIComponent(id):""),{
   method,headers:{Authorization:"Bot "+env.DISCORD_BOT_TOKEN,...(body?{"Content-Type":"application/json"}:{})},...(body?{body:JSON.stringify(body)}:{})
  });
- if(!response.ok)throw Error("Discord rejected the request (HTTP "+response.status+"). Check channel permissions.");
+ if(method==="DELETE"&&response.status===404)return {alreadyMissing:true};
+ if(!response.ok)throw Error("Discord "+method+" failed (HTTP "+response.status+"). Check the bot message and channel.");
  return method==="DELETE"?{}:response.json();
 }
 function discordBody(item) {
