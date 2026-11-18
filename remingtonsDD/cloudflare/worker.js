@@ -212,7 +212,7 @@ async function handleAnnouncement(env,request) {
 export default {
  async fetch(request,env) {
   const url=new URL(request.url),origin=request.headers.get("Origin");
-  const cors={"Access-Control-Allow-Origin":ORIGIN,"Vary":"Origin","Access-Control-Allow-Methods":"POST, OPTIONS","Access-Control-Allow-Headers":"Content-Type, Authorization"};
+  const cors={"Access-Control-Allow-Origin":ORIGIN,"Vary":"Origin","Access-Control-Allow-Methods":"GET, POST, PATCH, DELETE, OPTIONS","Access-Control-Allow-Headers":"Content-Type, Authorization"};
   if((["/submit","/contact","/admin/bot-check"].includes(url.pathname)||url.pathname.startsWith("/admin/announcements"))&&request.method==="OPTIONS")return new Response(null,{status:204,headers:cors});
   if(url.pathname==="/")return new Response("Digital Den Discord verification service is running.");
   if(!env.DISCORD_CLIENT_ID||!env.DISCORD_CLIENT_SECRET||!env.DISCORD_GUILD_ID||!env.SESSION_SIGNING_SECRET||!env.FIREBASE_SERVICE_ACCOUNT)return json({error:"Service not configured"},503);
