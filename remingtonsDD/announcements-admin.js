@@ -51,7 +51,7 @@ function render(){
    if(!confirm('Delete this '+(item.status==='published'?'announcement from Discord and history':'draft')+'? This cannot be undone.'))return;
    remove.disabled=true;
    try{await request('DELETE',item.id);if(currentId===item.id)reset();await load()}
-   catch(e){$('list-status').textContent=e.message;remove.disabled=false}
+   catch(e){$('list-status').textContent='Delete failed: '+e.message;remove.disabled=false}
   };
   buttons.append(change,remove);box.append(h,meta,body,buttons);list.append(box);
  }
