@@ -6,22 +6,7 @@ service cloud.firestore {
     }
     match /partnershipInquiries/{inquiryId} {
       allow read: if isAdmin();
-      allow create: if false // Discord-verified enquiries are created by the Worker only\n        && request.auth != null
-        && inquiryId == 'digital-den_' + request.auth.uid
-        && request.resource.data.keys().hasAll(['businessId','senderUid','businessName','contactName','discord','message','status','createdAt'])
-        && request.resource.data.keys().hasOnly(['businessId','senderUid','businessName','contactName','discord','message','status','createdAt'])
-        && request.resource.data.businessId == 'digital-den'
-        && request.resource.data.senderUid == request.auth.uid
-        && request.resource.data.businessName is string
-        && request.resource.data.businessName.size() >= 2 && request.resource.data.businessName.size() <= 120
-        && request.resource.data.contactName is string
-        && request.resource.data.contactName.size() >= 2 && request.resource.data.contactName.size() <= 80
-        && request.resource.data.discord is string
-        && request.resource.data.discord.size() >= 2 && request.resource.data.discord.size() <= 120
-        && request.resource.data.message is string
-        && request.resource.data.message.size() >= 10 && request.resource.data.message.size() <= 2000
-        && request.resource.data.status == 'new'
-        && request.resource.data.createdAt == request.time;
+      allow create: if false; // Worker-only submissions
       allow update: if isAdmin()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','reviewedAt'])
         && request.resource.data.status in ['new','contacted','closed']
