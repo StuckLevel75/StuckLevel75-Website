@@ -78,7 +78,7 @@ function validate(d) {
 async function assignDiscordRoles(env,discordId,purpose) {
   if(!env.DISCORD_BOT_TOKEN)throw Error("DISCORD_BOT_TOKEN is not configured");
   const purposeRole=purpose==="contact"?"1572468132562337803":"1572467945097920664";
-  const roles=[env.DISCORD_MEMBER_ROLE_ID,purposeRole].filter(Boolean);
+  const roles=["1572372330707947791",purposeRole];
   for(const roleId of new Set(roles)) {
     const response=await fetch(`https://discord.com/api/v10/guilds/${env.DISCORD_GUILD_ID}/members/${discordId}/roles/${roleId}`,{
       method:"PUT",headers:{Authorization:"Bot "+env.DISCORD_BOT_TOKEN}
