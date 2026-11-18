@@ -132,7 +132,7 @@ async function botDiagnostics(env) {
   const headers={Authorization:"Bot "+env.DISCORD_BOT_TOKEN};
   const [botResponse,guildResponse,rolesResponse]=await Promise.all([
     fetch("https://discord.com/api/v10/users/@me",{headers}),
-    fetch("https://discord.com/api/v10/guilds/"+env.DISCORD_GUILD_ID+"/members/@me",{headers}),
+    fetch("https://discord.com/api/v10/guilds/"+env.DISCORD_GUILD_ID+"/members/"+encodeURIComponent((await (await fetch("https://discord.com/api/v10/users/@me",{headers})).json()).id),{headers}),
     fetch("https://discord.com/api/v10/guilds/"+env.DISCORD_GUILD_ID+"/roles",{headers})
   ]);
   if(!botResponse.ok)return {ok:false,error:"Discord rejected the bot token (HTTP "+botResponse.status+")."};
