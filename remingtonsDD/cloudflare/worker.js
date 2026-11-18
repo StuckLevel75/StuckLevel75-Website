@@ -209,13 +209,99 @@ async function handleAnnouncement(env,request) {
  return {ok:true,id:target,item:{...record,id:target}};
 }
 
+
+const RESTOCK_CHANNEL="1572372383161909290";
+const RESTOCK_MANAGER_ROLE="1572372322092974154";
+const RESTOCK_COLLECTION="digitalDenRestockRequests";
+const restockReply=(data,status=200)=>json(data,status);
+const restockMessage=(content,ephemeral=true)=>({type:4,data:{content,flags:ephemeral?64:0,allowed_mentions:{parse:[]}}});
+function restockButtons(id,status) {
+ return [{type:1,components:["approved","denied","restocked"].map(action=>({type:2,style:action==="approved"?3:action==="denied"?4:1,label:action==="approved"?"Approve":action==="denied"?"Deny":"Restocked",custom_id:"restock:"+action+":"+id,disabled:status!=="pending"&&!(status==="approved"&&action==="restocked")}))}];
+}
+function restockEmbed(item) {
+ return [{title:"Restock Request",color:item.status==="restocked"?0x2ecc71:item.status==="denied"?0xe74c3c:0x9d55db,fields:[{name:"Item",value:item.item},{name:"Requested by",value:"<@"+item.requester+">"},{name:"Status",value:item.status.charAt(0).toUpperCase()+item.status.slice(1)}],footer:{text:"Remington's Digital Den"}}];
+}
+async function restockFirestore(env,id,method="GET",value) {
+ const access=await firebaseToken(env),url=firestoreRoot+"/"+RESTOCK_COLLECTION+"/"+encodeURIComponent(id);
+ const response=await fetch(url,{method,headers:{Authorization:"Bearer "+access,...(value?{"Content-Type":"application/json"}:{})},...(value?{body:JSON.stringify(announcementData(value))}:{})});
+ if(response.status===404)return null;
+ if(!response.ok)throw Error("Restock database error HTTP "+response.status);
+ return response.json();
+}
+function restockUser(interaction) {return interaction.member?.user?.id||interaction.user?.id||"";}
+function isRestockManager(interaction,env) {
+ const roles=interaction.member?.roles||[];
+ return roles.includes(RESTOCK_MANAGER_ROLE)||(BigInt(interaction.member?.permissions||"0")&8n)!==0n||restockUser(interaction)===env.RESTOCK_OWNER_ID;
+}
+async function verifyDiscordInteraction(request,env,body) {
+ const signature=request.headers.get("X-Signature-Ed25519"),timestamp=request.headers.get("X-Signature-Timestamp");
+ const pub=env.DISCORD_PUBLIC_KEY;
+ if(!signature||!timestamp||!pub||!/^([0-9a-f]{2}){64}$/i.test(signature)||!/^([0-9a-f]{2}){32}$/i.test(pub)||!/^[0-9]{10}$/.test(timestamp)||Math.abs(Date.now()/1000-Number(timestamp))>300)return false;
+ try {
+  const bytes=hex=>Uint8Array.from(hex.match(/../g),x=>parseInt(x,16));
+  const key=await crypto.subtle.importKey("raw",bytes(pub),{name:"Ed25519"},false,["verify"]);
+  return await crypto.subtle.verify("Ed25519",key,bytes(signature),encoder.encode(timestamp+body));
+ }catch{return false}
+}
+async function restockInteraction(request,env) {
+ if(Number(request.headers.get("Content-Length")||0)>16000)return restockReply({error:"Payload too large"},413);
+ const raw=await request.text();
+ if(!await verifyDiscordInteraction(request,env,raw))return new Response("Invalid request signature",{status:401});
+ let i;try{i=JSON.parse(raw)}catch{return new Response("Invalid JSON",{status:400})}
+ if(i.type===1)return restockReply({type:1});
+ if(i.guild_id!==env.DISCORD_GUILD_ID||i.channel_id!==RESTOCK_CHANNEL)return restockReply(restockMessage("This feature is only available in Staff Updates."));
+ const id=i.data?.custom_id||"";
+ if(i.type===3&&id==="restock:open"){
+  return restockReply({type:9,data:{custom_id:"restock:submit",title:"Request Restock",components:[{type:1,components:[{type:4,custom_id:"item",label:"Item to restock",style:1,min_length:1,max_length:120,required:true,placeholder:"e.g. Laptops"}]}]}});
+ }
+ if(i.type===5&&id==="restock:submit"){
+  const item=i.data?.components?.[0]?.components?.[0]?.value?.trim();
+  if(!item||item.length>120)return restockReply(restockMessage("Enter a valid item name."));
+  const requester=restockUser(i),requestId=crypto.randomUUID(),record={item,requester,status:"pending",createdAt:new Date().toISOString(),messageId:""};
+  try {
+   const message=await discordAnnouncement(env,"staff","","POST",{embeds:restockEmbed(record),components:restockButtons(requestId,"pending"),allowed_mentions:{parse:[]}});
+   record.messageId=message.id;
+   await restockFirestore(env,requestId,"PATCH",record);
+   return restockReply(restockMessage("Restock request submitted."));
+  }catch(e){console.error("Restock submit",e.message);return restockReply(restockMessage("Could not save the request. Please tell a manager."))}
+ }
+ const match=/^restock:(approved|denied|restocked):([a-f0-9-]{36})$/.exec(id);
+ if(i.type===3&&match){
+  if(!isRestockManager(i,env))return restockReply(restockMessage("Only managers can update restock requests."));
+  const [,action,requestId]=match;
+  try {
+   const doc=await restockFirestore(env,requestId);
+   if(!doc)return restockReply(restockMessage("Request not found."));
+   const record=fromFields(doc.fields);
+   if(record.messageId!==i.message?.id)return restockReply(restockMessage("Request message mismatch."));
+   if(record.status==="restocked"||record.status==="denied"||record.status==="approved"&&action!=="restocked")return restockReply(restockMessage("This request has already been handled."));
+   if(action==="restocked"&&record.status!=="approved")return restockReply(restockMessage("Approve the request first."));
+   const next={...record,status:action,handledBy:restockUser(i),updatedAt:new Date().toISOString()};
+   await restockFirestore(env,requestId,"PATCH",next);
+   return restockReply({type:7,data:{embeds:restockEmbed(next),components:restockButtons(requestId,action),allowed_mentions:{parse:[]}}});
+  }catch(e){console.error("Restock update",e.message);return restockReply(restockMessage("Could not update this request. Try again."))}
+ }
+ return restockReply(restockMessage("Unknown restock action."));
+}
+async function postRestockPanel(env) {
+ const result=await discordAnnouncement(env,"staff","","POST",{embeds:[{title:"Staff Restock Requests",description:"Need something restocked? Click the button below and enter the item name.",color:0x9d55db}],components:[{type:1,components:[{type:2,style:1,label:"Request Restock",custom_id:"restock:open",emoji:{name:"📦"}}]}],allowed_mentions:{parse:[]}});
+ return {ok:true,messageId:result.id};
+}
+
 export default {
  async fetch(request,env) {
   const url=new URL(request.url),origin=request.headers.get("Origin");
   const cors={"Access-Control-Allow-Origin":ORIGIN,"Vary":"Origin","Access-Control-Allow-Methods":"GET, POST, PATCH, DELETE, OPTIONS","Access-Control-Allow-Headers":"Content-Type, Authorization"};
-  if((["/submit","/contact","/admin/bot-check"].includes(url.pathname)||url.pathname.startsWith("/admin/announcements"))&&request.method==="OPTIONS")return new Response(null,{status:204,headers:cors});
+  if((["/submit","/contact","/admin/bot-check"].includes(url.pathname)||url.pathname.startsWith("/admin/announcements")||url.pathname==="/admin/restock-panel")&&request.method==="OPTIONS")return new Response(null,{status:204,headers:cors});
+  if(url.pathname==="/discord/interactions"&&request.method==="POST")return restockInteraction(request,env);
   if(url.pathname==="/")return new Response("Digital Den Discord verification service is running.");
   if(!env.DISCORD_CLIENT_ID||!env.DISCORD_CLIENT_SECRET||!env.DISCORD_GUILD_ID||!env.SESSION_SIGNING_SECRET||!env.FIREBASE_SERVICE_ACCOUNT)return json({error:"Service not configured"},503);
+  if(url.pathname==="/admin/restock-panel"&&request.method==="POST") {
+    if(origin!==ORIGIN)return json({error:"Invalid origin"},403,cors);
+    const authorization=request.headers.get("Authorization")||"";
+    if(!authorization.startsWith("Bearer ")||!await verifyAdminToken(env,authorization.slice(7)))return json({error:"Administrator access required"},403,cors);
+    try{return json(await postRestockPanel(env),200,cors)}catch(e){console.error("Restock panel",e.message);return json({error:"Could not post restock button"},502,cors)}
+  }
   if(url.pathname==="/admin/bot-check"&&request.method==="POST") {
     if(origin!==ORIGIN)return json({error:"Invalid origin"},403,cors);
     const authorization=request.headers.get("Authorization")||"";
