@@ -59,7 +59,8 @@ async function submit(env,payload,data) {
   if(record.fields?.hiringOpen?.booleanValue!==true||record.fields?.status?.stringValue==="past")return {error:"Applications are closed",status:403};
   const name="digital-den_discord_"+payload.discordId;
   const values={businessId:"digital-den",applicantUid:"discord:"+payload.discordId,discordId:payload.discordId,discordUsername:payload.username||"",name:data.name,contact:data.contact,experience:data.experience,reason:data.reason,availability:data.availability,extraAnswers:data.extraAnswers,status:"pending"};
-  const fields=Object.fromEntries(Object.entries(values).map(([k,v])=>[k,fv(v)]));\n  fields.createdAt={timestampValue:new Date().toISOString()};
+  const fields=Object.fromEntries(Object.entries(values).map(([k,v])=>[k,fv(v)]));
+  fields.createdAt={timestampValue:new Date().toISOString()};
   // Firestore createDocument fails with ALREADY_EXISTS, preventing duplicate submissions.
   const response=await fetch(root+"/applications?documentId="+encodeURIComponent(name),{method:"POST",headers:{...headers,"Content-Type":"application/json"},body:JSON.stringify({fields})});
   if(response.status===409)return {error:"You have already applied.",status:409};
