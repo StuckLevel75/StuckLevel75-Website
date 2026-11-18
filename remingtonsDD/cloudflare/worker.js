@@ -106,13 +106,61 @@ async function submitInquiry(env,payload,data) {
   if(!response.ok)throw Error("Firestore enquiry creation failed");
   return {ok:true};
 }
+// Read-only diagnostics. Only the Firebase administrator can request these checks.
+async function verifyAdminToken(env,token) {
+  if(typeof token!=="string"||token.length>5000)return false;
+  const parts=token.split(".");
+  if(parts.length!==3)return false;
+  try {
+    const header=JSON.parse(new TextDecoder().decode(unb64url(parts[0])));
+    const claims=JSON.parse(new TextDecoder().decode(unb64url(parts[1])));
+    const project=JSON.parse(env.FIREBASE_SERVICE_ACCOUNT).project_id;
+    const now=Math.floor(Date.now()/1000);
+    if(header.alg!=="RS256"||!header.kid||claims.aud!==project||claims.iss!=="https://securetoken.google.com/"+project||claims.sub!=="Bm2XwQBXXEePFaaMfLs5K5ck0HB2"||claims.exp<=now||claims.iat>now||claims.auth_time>now)return false;
+    const keysResponse=await fetch("https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com");
+    if(!keysResponse.ok)return false;
+    const keys=await keysResponse.json();
+    const jwk=keys.keys?.find(k=>k.kid===header.kid);
+    if(!jwk)return false;
+    const key=await crypto.subtle.importKey("jwk",jwk,{name:"RSASSA-PKCS1-v1_5",hash:"SHA-256"},false,["verify"]);
+    return await crypto.subtle.verify("RSASSA-PKCS1-v1_5",key,unb64url(parts[2]),encoder.encode(parts[0]+"."+parts[1]));
+  }catch{return false;}
+}
+async function botDiagnostics(env) {
+  const roles=[{name:"Member",id:"1572372330707947791"},{name:"Job Applicant",id:"1572467945097920664"},{name:"Business Contact",id:"1572468132562337803"}];
+  if(!env.DISCORD_BOT_TOKEN)return {ok:false,error:"Bot token is missing in Cloudflare."};
+  const headers={Authorization:"Bot "+env.DISCORD_BOT_TOKEN};
+  const [botResponse,guildResponse,rolesResponse]=await Promise.all([
+    fetch("https://discord.com/api/v10/users/@me",{headers}),
+    fetch("https://discord.com/api/v10/guilds/"+env.DISCORD_GUILD_ID+"/members/@me",{headers}),
+    fetch("https://discord.com/api/v10/guilds/"+env.DISCORD_GUILD_ID+"/roles",{headers})
+  ]);
+  if(!botResponse.ok)return {ok:false,error:"Discord rejected the bot token (HTTP "+botResponse.status+")."};
+  if(!guildResponse.ok||!rolesResponse.ok)return {ok:false,error:"Bot cannot access server or roles (HTTP "+guildResponse.status+"/"+rolesResponse.status+")."};
+  const bot=await botResponse.json(),member=await guildResponse.json(),guildRoles=await rolesResponse.json();
+  const botRoles=guildRoles.filter(r=>member.roles.includes(r.id));
+  const highest=Math.max(0,...botRoles.map(r=>r.position));
+  const admin=botRoles.some(r=>(BigInt(r.permissions)&8n)!==0n);
+  const manage=admin||botRoles.some(r=>(BigInt(r.permissions)&(1n<<28n))!==0n);
+  const checks=roles.map(r=>{
+    const found=guildRoles.find(x=>x.id===r.id);
+    return {name:r.name,exists:!!found,assignable:!!found&&manage&&highest>found.position,reason:!found?"Role not found":!manage?"Bot needs Manage Roles":highest<=found.position?"Move the bot's highest role above this role":"Ready"};
+  });
+  return {ok:checks.every(r=>r.assignable),botName:bot.username,manageRoles:manage,roles:checks};
+}
 export default {
  async fetch(request,env) {
   const url=new URL(request.url),origin=request.headers.get("Origin");
-  const cors={"Access-Control-Allow-Origin":ORIGIN,"Vary":"Origin","Access-Control-Allow-Methods":"POST, OPTIONS","Access-Control-Allow-Headers":"Content-Type"};
-  if(["/submit","/contact"].includes(url.pathname)&&request.method==="OPTIONS")return new Response(null,{status:204,headers:cors});
+  const cors={"Access-Control-Allow-Origin":ORIGIN,"Vary":"Origin","Access-Control-Allow-Methods":"POST, OPTIONS","Access-Control-Allow-Headers":"Content-Type, Authorization"};
+  if(["/submit","/contact","/admin/bot-check"].includes(url.pathname)&&request.method==="OPTIONS")return new Response(null,{status:204,headers:cors});
   if(url.pathname==="/")return new Response("Digital Den Discord verification service is running.");
   if(!env.DISCORD_CLIENT_ID||!env.DISCORD_CLIENT_SECRET||!env.DISCORD_GUILD_ID||!env.SESSION_SIGNING_SECRET||!env.FIREBASE_SERVICE_ACCOUNT)return json({error:"Service not configured"},503);
+  if(url.pathname==="/admin/bot-check"&&request.method==="POST") {
+    if(origin!==ORIGIN)return json({error:"Invalid origin"},403,cors);
+    const authorization=request.headers.get("Authorization")||"";
+    if(!authorization.startsWith("Bearer ")||!await verifyAdminToken(env,authorization.slice(7)))return json({error:"Administrator access required"},403,cors);
+    try{return json(await botDiagnostics(env),200,cors)}catch(e){console.error("Bot diagnostics failed",e.message);return json({error:"Could not complete Discord bot checks"},502,cors)}
+  }
   if(url.pathname==="/login"&&request.method==="GET") {
     const state=crypto.randomUUID();
     const purpose=url.searchParams.get("purpose")==="contact"?"contact":"apply";
