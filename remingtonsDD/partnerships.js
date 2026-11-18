@@ -16,7 +16,7 @@ if (location.hash === '#discord-not-member') {
 }
 function refresh() {
   send.disabled = !token;
-  if (token) $('discord-verify-status').textContent = 'Discord verified. You can send your enquiry.';
+  if (token) $('discord-verify-status').textContent = 'Discord verified. You can send your inquiry.';
 }
 refresh();
 form.addEventListener('submit', async event => {
@@ -30,7 +30,7 @@ form.addEventListener('submit', async event => {
   };
   if (!form.reportValidity()) return;
   send.disabled = true;
-  status.textContent = 'Sending your enquiry…';
+  status.textContent = 'Sending your inquiry…';
   try {
     const response = await fetch(worker + '/contact', {
       method: 'POST',
@@ -38,14 +38,14 @@ form.addEventListener('submit', async event => {
       body: JSON.stringify({token, inquiry})
     });
     const result = await response.json();
-    if (!response.ok) throw new Error(result.error || 'Could not send enquiry');
+    if (!response.ok) throw new Error(result.error || 'Could not send inquiry');
     form.reset();
     token = '';
     sessionStorage.removeItem('dd_contact_token');
-    send.textContent = 'Enquiry sent';
+    send.textContent = 'Inquiry sent';
     status.textContent = 'Message sent. Management will follow up with you on Discord.';
   } catch (error) {
-    status.textContent = error.message || 'Could not send enquiry. Try again.';
+    status.textContent = error.message || 'Could not send inquiry. Try again.';
     if (/expired/i.test(status.textContent)) {
       token = '';
       sessionStorage.removeItem('dd_contact_token');

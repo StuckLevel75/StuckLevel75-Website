@@ -102,8 +102,8 @@ async function submitInquiry(env,payload,data) {
   const response=await fetch(root+"/partnershipInquiries?documentId="+encodeURIComponent("digital-den_discord_"+payload.discordId),{
     method:"POST",headers:{Authorization:"Bearer "+access,"Content-Type":"application/json"},body:JSON.stringify({fields})
   });
-  if(response.status===409)return {error:"You have already sent an enquiry. Contact staff on Discord for follow-up.",status:409};
-  if(!response.ok)throw Error("Firestore enquiry creation failed");
+  if(response.status===409)return {error:"You have already sent an inquiry. Contact staff on Discord for follow-up.",status:409};
+  if(!response.ok)throw Error("Firestore inquiry creation failed");
   return {ok:true};
 }
 // Read-only diagnostics. Only the Firebase administrator can request these checks.
@@ -188,7 +188,7 @@ export default {
   }
   if(url.pathname==="/contact"&&request.method==="POST") {
     if(origin!==ORIGIN)return json({error:"Invalid origin"},403,cors);
-    if(Number(request.headers.get("Content-Length")||0)>12000)return json({error:"Enquiry too large"},413,cors);
+    if(Number(request.headers.get("Content-Length")||0)>12000)return json({error:"Inquiry too large"},413,cors);
     try {
       const body=await request.json();
       const payload=await readPayload(env.SESSION_SIGNING_SECRET,body.token);
@@ -196,7 +196,7 @@ export default {
       if(!validateInquiry(body.inquiry))return json({error:"Complete all required fields."},400,cors);
       const result=await submitInquiry(env,payload,body.inquiry);
       return json(result,result.status||200,cors);
-    } catch(e) {console.error("Enquiry failed",e.message);return json({error:"Unable to send enquiry. Please try again."},500,cors);}
+    } catch(e) {console.error("Inquiry failed",e.message);return json({error:"Unable to send inquiry. Please try again."},500,cors);}
   }
   if(url.pathname==="/submit"&&request.method==="POST") {
     if(origin!==ORIGIN)return json({error:"Invalid origin"},403,cors);

@@ -34,16 +34,16 @@ function field(dl, label, value) {
 function render() {
   const visible = records.filter(item => $('filter').value === 'all' || (item.status || 'new') === $('filter').value);
   $('inquiry-list').replaceChildren();
-  $('inbox-status').textContent = visible.length ? visible.length + ' enquiry / enquiries shown' : 'No enquiries in this category.';
+  $('inbox-status').textContent = visible.length ? visible.length + ' inquiries shown' : 'No inquiries in this category.';
   for (const item of visible) {
     const card = document.createElement('article'); card.className = 'inquiry';
-    const title = document.createElement('h2'); title.textContent = item.businessName || 'Business enquiry';
+    const title = document.createElement('h2'); title.textContent = item.businessName || 'Business inquiry';
     const meta = document.createElement('p'); meta.className = 'meta';
     meta.textContent = (item.createdAt?.toDate?.().toLocaleString() || 'Date unavailable') + ' · ' + (item.status || 'new').toUpperCase();
     const dl = document.createElement('dl');
     field(dl, 'Contact name', item.contactName); field(dl, 'Discord username', item.discord); field(dl, 'Message', item.message);
     const actions = document.createElement('div'); actions.className = 'actions';
-    const select = document.createElement('select'); select.setAttribute('aria-label', 'Status for ' + (item.businessName || 'enquiry'));
+    const select = document.createElement('select'); select.setAttribute('aria-label', 'Status for ' + (item.businessName || 'inquiry'));
     for (const value of states) {
       const option = document.createElement('option'); option.value = value; option.textContent = value[0].toUpperCase() + value.slice(1); select.append(option);
     }
@@ -53,7 +53,7 @@ function render() {
       save.disabled = true;
       try {
         await updateDoc(doc(db, 'partnershipInquiries', item.id), {status: select.value, reviewedAt: serverTimestamp()});
-        if (auth.currentUser?.uid === adminUid) $('inbox-status').textContent = 'Enquiry updated.';
+        if (auth.currentUser?.uid === adminUid) $('inbox-status').textContent = 'Inquiry updated.';
       } catch (error) { if (auth.currentUser?.uid === adminUid) $('inbox-status').textContent = 'Could not save. Please try again.'; }
       finally { save.disabled = false; }
     });
@@ -70,11 +70,11 @@ onAuthStateChanged(auth, user => {
   $('dashboard').classList.toggle('hidden', !allowed);
   $('login-status').textContent = user && !allowed ? 'This account does not have management access.' : '';
   if (!allowed) return;
-  $('inbox-status').textContent = 'Loading enquiries…';
+  $('inbox-status').textContent = 'Loading inquiries…';
   const expectedUid = user.uid;
   stop = onSnapshot(query(collection(db, 'partnershipInquiries'), where('businessId', '==', 'digital-den')), snapshot => {
     if (auth.currentUser?.uid !== expectedUid) return;
     records = snapshot.docs.map(item => ({...item.data(), id: item.id})).sort((a,b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
     render();
-  }, () => { if (auth.currentUser?.uid === expectedUid) $('inbox-status').textContent = 'Unable to load enquiries. Check that the updated Firestore rules are published.'; });
+  }, () => { if (auth.currentUser?.uid === expectedUid) $('inbox-status').textContent = 'Unable to load inquiries. Check that the updated Firestore rules are published.'; });
 });
