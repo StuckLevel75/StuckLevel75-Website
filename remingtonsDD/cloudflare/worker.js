@@ -73,6 +73,19 @@ function validate(d) {
   for(const [key,[min,max]] of Object.entries(limits))if(typeof d[key]!=="string"||d[key].trim().length<min||d[key].length>max)return false;
   return Array.isArray(d.extraAnswers)&&d.extraAnswers.length<=8&&d.extraAnswers.every(a=>a&&typeof a.question==="string"&&a.question.length<=200&&typeof a.answer==="string"&&a.answer.length<=1200);
 }
+// Assign the purpose role and, when configured, the default Member role.
+// Discord requires the bot to have Manage Roles and sit above each target role.
+async function assignDiscordRoles(env,discordId,purpose) {
+  if(!env.DISCORD_BOT_TOKEN)throw Error("DISCORD_BOT_TOKEN is not configured");
+  const purposeRole=purpose==="contact"?"1572468132562337803":"1572467945097920664";
+  const roles=[env.DISCORD_MEMBER_ROLE_ID,purposeRole].filter(Boolean);
+  for(const roleId of new Set(roles)) {
+    const response=await fetch(`https://discord.com/api/v10/guilds/${env.DISCORD_GUILD_ID}/members/${discordId}/roles/${roleId}`,{
+      method:"PUT",headers:{Authorization:"Bot "+env.DISCORD_BOT_TOKEN}
+    });
+    if(!response.ok)throw Error("Discord role assignment failed for role "+roleId+" (HTTP "+response.status+")");
+  }
+}
 function validateInquiry(d) {
   return d && typeof d==="object" && [["businessName",2,120],["contactName",2,80],["discord",2,120],["message",10,2000]].every(([key,min,max])=>typeof d[key]==="string"&&d[key].trim().length>=min&&d[key].length<=max);
 }
@@ -110,7 +123,8 @@ export default {
     const state=url.searchParams.get("state"),saved=cookieValue(request,"dd_oauth_state");
     if(!state||!saved||!saved.startsWith(state+".")||!url.searchParams.get("code"))return new Response("Invalid or expired Discord sign-in. Please start again.",{status:403});
     const purpose=saved.endsWith(".contact")?"contact":"apply";
-    const returnPath=purpose==="contact"?"/remingtonsDD/Partnerships/":"/remingtonsDD/Apply/";\n    const tokenResponse=await fetch("https://discord.com/api/v10/oauth2/token",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams({client_id:env.DISCORD_CLIENT_ID,client_secret:env.DISCORD_CLIENT_SECRET,grant_type:"authorization_code",code:url.searchParams.get("code"),redirect_uri:CALLBACK})});
+    const returnPath=purpose==="contact"?"/remingtonsDD/Partnerships/":"/remingtonsDD/Apply/";
+    const tokenResponse=await fetch("https://discord.com/api/v10/oauth2/token",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams({client_id:env.DISCORD_CLIENT_ID,client_secret:env.DISCORD_CLIENT_SECRET,grant_type:"authorization_code",code:url.searchParams.get("code"),redirect_uri:CALLBACK})});
     if(!tokenResponse.ok)return new Response("Discord sign-in failed. Try again.",{status:502});
     const token=await tokenResponse.json();
     const authHeader={Authorization:"Bearer "+token.access_token};
@@ -120,6 +134,7 @@ export default {
     ]);
     if(!userResp.ok||!memberResp.ok)return redirect(ORIGIN+returnPath+"#discord-not-member",cookie("dd_oauth_state","",0));
     const user=await userResp.json();
+    try {await assignDiscordRoles(env,user.id,purpose)}catch(e){console.error(e.message);return new Response("Discord verification succeeded, but we could not assign your server roles. Please contact staff.",{status:502});}
     const signed=await signPayload(env.SESSION_SIGNING_SECRET,{aud:"dd-apply",discordId:user.id,username:user.username,exp:Date.now()+10*60*1000});
     return redirect(ORIGIN+returnPath+"#dd_token="+encodeURIComponent(signed),cookie("dd_oauth_state","",0));
   }
