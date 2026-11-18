@@ -6,7 +6,7 @@ service cloud.firestore {
     }
     match /partnershipInquiries/{inquiryId} {
       allow read: if isAdmin();
-      allow create: if request.auth != null
+      allow create: if false // Discord-verified enquiries are created by the Worker only\n        && request.auth != null
         && inquiryId == 'digital-den_' + request.auth.uid
         && request.resource.data.keys().hasAll(['businessId','senderUid','businessName','contactName','discord','message','status','createdAt'])
         && request.resource.data.keys().hasOnly(['businessId','senderUid','businessName','contactName','discord','message','status','createdAt'])
