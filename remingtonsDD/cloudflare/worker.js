@@ -1,0 +1,118 @@
+// Deploy this file to Cloudflare Worker digital-den-auth (not GitHub Pages).
+// Required secrets: DISCORD_CLIENT_SECRET, FIREBASE_SERVICE_ACCOUNT, SESSION_SIGNING_SECRET (random 32+ chars).
+// Required text vars: DISCORD_CLIENT_ID, DISCORD_GUILD_ID, WEBSITE_URL.
+const ORIGIN = "https://stucklevel75.com";
+const CALLBACK = "https://digital-den-auth.dburghagen.workers.dev/callback";
+const encoder = new TextEncoder();
+const b64url = bytes => btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
+const unb64url = s => Uint8Array.from(atob(s.replace(/-/g,"+").replace(/_/g,"/").padEnd(Math.ceil(s.length/4)*4,"=")),c=>c.charCodeAt(0));
+const json = (data,status=200,headers={}) => new Response(JSON.stringify(data),{status,headers:{"Content-Type":"application/json","Cache-Control":"no-store",...headers}});
+const redirect = (url,cookie) => new Response(null,{status:302,headers:{Location:url,"Cache-Control":"no-store",...(cookie?{"Set-Cookie":cookie}:{})}});
+const cookie = (name,value,maxAge=600) => `${name}=${value}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${maxAge}`;
+const cookieValue = (request,name) => (request.headers.get("Cookie")||"").split(";").map(s=>s.trim()).find(s=>s.startsWith(name+"="))?.slice(name.length+1);
+async function hmac(secret,value) {
+  const key=await crypto.subtle.importKey("raw",encoder.encode(secret),{name:"HMAC",hash:"SHA-256"},false,["sign","verify"]);
+  return b64url(await crypto.subtle.sign("HMAC",key,encoder.encode(value)));
+}
+async function signPayload(secret,payload) {
+  const body=b64url(encoder.encode(JSON.stringify(payload)));
+  return body+"."+await hmac(secret,body);
+}
+async function readPayload(secret,token) {
+  if(typeof token!=="string"||token.length>4000)return null;
+  const [body,signature,...rest]=token.split(".");
+  if(!body||!signature||rest.length)return null;
+  const expected=await hmac(secret,body);
+  const a=encoder.encode(signature),b=encoder.encode(expected);
+  if(a.length!==b.length)return null;
+  let diff=0;for(let i=0;i<a.length;i++)diff|=a[i]^b[i];
+  if(diff)return null;
+  try { const payload=JSON.parse(new TextDecoder().decode(unb64url(body)));
+    return payload.exp>Date.now()&&payload.exp<=Date.now()+600000&&payload.aud==="dd-apply"&&/^\d{15,22}$/.test(payload.discordId)?payload:null;
+  } catch{return null;}
+}
+let cachedAuth=null;
+async function firebaseToken(env) {
+  if(cachedAuth&&cachedAuth.exp>Date.now()+60000)return cachedAuth.value;
+  const sa=JSON.parse(env.FIREBASE_SERVICE_ACCOUNT);
+  if(!sa.client_email||!sa.private_key||!sa.project_id)throw Error("Invalid Firebase service account");
+  const now=Math.floor(Date.now()/1000);
+  const head=b64url(encoder.encode(JSON.stringify({alg:"RS256",typ:"JWT"})));
+  const claims=b64url(encoder.encode(JSON.stringify({iss:sa.client_email,sub:sa.client_email,aud:"https://oauth2.googleapis.com/token",scope:"https://www.googleapis.com/auth/datastore",iat:now,exp:now+3600})));
+  const keyData=sa.private_key.replace(/-----BEGIN PRIVATE KEY-----|-----END PRIVATE KEY-----|\s/g,"");
+  const key=await crypto.subtle.importKey("pkcs8",Uint8Array.from(atob(keyData),c=>c.charCodeAt(0)),{name:"RSASSA-PKCS1-v1_5",hash:"SHA-256"},false,["sign"]);
+  const assertion=head+"."+claims+"."+b64url(await crypto.subtle.sign("RSASSA-PKCS1-v1_5",key,encoder.encode(head+"."+claims)));
+  const resp=await fetch("https://oauth2.googleapis.com/token",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams({grant_type:"urn:ietf:params:oauth:grant-type:jwt-bearer",assertion})});
+  if(!resp.ok)throw Error("Firebase authorization failed");
+  const data=await resp.json();cachedAuth={value:data.access_token,exp:Date.now()+(data.expires_in||3600)*1000};return cachedAuth.value;
+}
+const fv = v => typeof v==="string"?{stringValue:v}:typeof v==="boolean"?{booleanValue:v}:Array.isArray(v)?{arrayValue:{values:v.map(fv)}}:v&&typeof v==="object"?{mapValue:{fields:Object.fromEntries(Object.entries(v).map(([k,val])=>[k,fv(val)]))}}:{nullValue:null};
+async function submit(env,payload,data) {
+  const sa=JSON.parse(env.FIREBASE_SERVICE_ACCOUNT),project=sa.project_id;
+  if(project!=="stucklevel75")throw Error("Firebase project mismatch");
+  const access=await firebaseToken(env);
+  const root=`https://firestore.googleapis.com/v1/projects/${project}/databases/(default)/documents`;
+  const headers={Authorization:"Bearer "+access};
+  const business=await fetch(root+"/businesses/digital-den",{headers});
+  if(!business.ok)throw Error("Could not check hiring status");
+  const record=await business.json();
+  if(record.fields?.hiringOpen?.booleanValue!==true||record.fields?.status?.stringValue==="past")return {error:"Applications are closed",status:403};
+  const name="digital-den_discord_"+payload.discordId;
+  const values={businessId:"digital-den",applicantUid:"discord:"+payload.discordId,discordId:payload.discordId,discordUsername:payload.username||"",name:data.name,contact:data.contact,experience:data.experience,reason:data.reason,availability:data.availability,extraAnswers:data.extraAnswers,status:"pending"};
+  const fields=Object.fromEntries(Object.entries(values).map(([k,v])=>[k,fv(v)]));
+  // Firestore createDocument fails with ALREADY_EXISTS, preventing duplicate submissions.
+  const response=await fetch(root+"/applications?documentId="+encodeURIComponent(name),{method:"POST",headers:{...headers,"Content-Type":"application/json"},body:JSON.stringify({fields,createTime:undefined})});
+  if(response.status===409)return {error:"You have already applied.",status:409};
+  if(!response.ok)throw Error("Could not save application");
+  return {ok:true};
+}
+function validate(d) {
+  if(!d||typeof d!=="object")return false;
+  const limits={name:[2,80],contact:[3,120],experience:[0,1200],reason:[10,1200],availability:[0,500]};
+  for(const [key,[min,max]] of Object.entries(limits))if(typeof d[key]!=="string"||d[key].trim().length<min||d[key].length>max)return false;
+  return Array.isArray(d.extraAnswers)&&d.extraAnswers.length<=8&&d.extraAnswers.every(a=>a&&typeof a.question==="string"&&a.question.length<=200&&typeof a.answer==="string"&&a.answer.length<=1200);
+}
+export default {
+ async fetch(request,env) {
+  const url=new URL(request.url),origin=request.headers.get("Origin");
+  const cors={"Access-Control-Allow-Origin":ORIGIN,"Vary":"Origin","Access-Control-Allow-Methods":"POST, OPTIONS","Access-Control-Allow-Headers":"Content-Type"};
+  if(url.pathname==="/submit"&&request.method==="OPTIONS")return new Response(null,{status:204,headers:cors});
+  if(url.pathname==="/")return new Response("Digital Den Discord verification service is running.");
+  if(!env.DISCORD_CLIENT_ID||!env.DISCORD_CLIENT_SECRET||!env.DISCORD_GUILD_ID||!env.SESSION_SIGNING_SECRET||!env.FIREBASE_SERVICE_ACCOUNT)return json({error:"Service not configured"},503);
+  if(url.pathname==="/login"&&request.method==="GET") {
+    const state=crypto.randomUUID();
+    const params=new URLSearchParams({client_id:env.DISCORD_CLIENT_ID,redirect_uri:CALLBACK,response_type:"code",scope:"identify guilds.members.read",state});
+    return redirect("https://discord.com/oauth2/authorize?"+params,cookie("dd_oauth_state",state));
+  }
+  if(url.pathname==="/callback"&&request.method==="GET") {
+    const state=url.searchParams.get("state"),saved=cookieValue(request,"dd_oauth_state");
+    if(!state||!saved||state!==saved||!url.searchParams.get("code"))return new Response("Invalid or expired Discord sign-in. Please start again.",{status:403});
+    const tokenResponse=await fetch("https://discord.com/api/v10/oauth2/token",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams({client_id:env.DISCORD_CLIENT_ID,client_secret:env.DISCORD_CLIENT_SECRET,grant_type:"authorization_code",code:url.searchParams.get("code"),redirect_uri:CALLBACK})});
+    if(!tokenResponse.ok)return new Response("Discord sign-in failed. Try again.",{status:502});
+    const token=await tokenResponse.json();
+    const authHeader={Authorization:"Bearer "+token.access_token};
+    const [userResp,memberResp]=await Promise.all([
+      fetch("https://discord.com/api/v10/users/@me",{headers:authHeader}),
+      fetch(`https://discord.com/api/v10/users/@me/guilds/${env.DISCORD_GUILD_ID}/member`,{headers:authHeader})
+    ]);
+    if(!userResp.ok||!memberResp.ok)return redirect(ORIGIN+"/remingtonsDD/Apply/#discord-not-member",cookie("dd_oauth_state","",0));
+    const user=await userResp.json();
+    const signed=await signPayload(env.SESSION_SIGNING_SECRET,{aud:"dd-apply",discordId:user.id,username:user.username,exp:Date.now()+10*60*1000});
+    return redirect(ORIGIN+"/remingtonsDD/Apply/#dd_token="+encodeURIComponent(signed),cookie("dd_oauth_state","",0));
+  }
+  if(url.pathname==="/submit"&&request.method==="POST") {
+    if(origin!==ORIGIN)return json({error:"Invalid origin"},403,cors);
+    if(Number(request.headers.get("Content-Length")||0)>16000)return json({error:"Application too large"},413,cors);
+    try {
+      const body=await request.json(),payload=await readPayload(env.SESSION_SIGNING_SECRET,body.token);
+      if(!payload)return json({error:"Discord verification expired. Please verify again."},403,cors);
+      if(!validate(body.application))return json({error:"Please complete all required fields."},400,cors);
+      // Re-check membership at submission time, using the bot token if available.
+      // OAuth proof is short-lived and tied to Discord's successful guild membership check.
+      const result=await submit(env,payload,body.application);
+      return json(result,result.status||200,cors);
+    } catch(e) {console.error("Application submission failed",e.message);return json({error:"Unable to submit application. Please try again."},500,cors);}
+  }
+  return new Response("Not found",{status:404});
+ }
+};
