@@ -259,7 +259,7 @@ async function restockInteraction(request,env) {
   if(!item||item.length>120)return restockReply(restockMessage("Enter a valid item name."));
   const requester=restockUser(i),requestId=crypto.randomUUID(),record={item,requester,status:"pending",createdAt:new Date().toISOString(),messageId:""};
   try {
-   const message=await discordAnnouncement(env,"restock","","POST",{embeds:restockEmbed(record),components:restockButtons(requestId,"pending"),allowed_mentions:{parse:[]}});
+   const message=await discordAnnouncement(env,"restock","","POST",{content:"<@&"+RESTOCK_MANAGER_ROLE+"> New restock request",embeds:restockEmbed(record),components:restockButtons(requestId,"pending"),allowed_mentions:{parse:[],roles:[RESTOCK_MANAGER_ROLE]}});
    record.messageId=message.id;
    await restockFirestore(env,requestId,"PATCH",record);
    return restockReply(restockMessage("Restock request submitted."));
