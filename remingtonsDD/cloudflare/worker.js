@@ -101,14 +101,16 @@ export default {
   if(url.pathname==="/")return new Response("Digital Den Discord verification service is running.");
   if(!env.DISCORD_CLIENT_ID||!env.DISCORD_CLIENT_SECRET||!env.DISCORD_GUILD_ID||!env.SESSION_SIGNING_SECRET||!env.FIREBASE_SERVICE_ACCOUNT)return json({error:"Service not configured"},503);
   if(url.pathname==="/login"&&request.method==="GET") {
-    const state=crypto.randomUUID();\n    const purpose=url.searchParams.get("purpose")==="contact"?"contact":"apply";
+    const state=crypto.randomUUID();
+    const purpose=url.searchParams.get("purpose")==="contact"?"contact":"apply";
     const params=new URLSearchParams({client_id:env.DISCORD_CLIENT_ID,redirect_uri:CALLBACK,response_type:"code",scope:"identify guilds.members.read",state});
-    return new Response(null,{status:302,headers:{Location:"https://discord.com/oauth2/authorize?"+params,"Cache-Control":"no-store","Set-Cookie":[cookie("dd_oauth_state",state+"."+purpose)}});
+    return new Response(null,{status:302,headers:{Location:"https://discord.com/oauth2/authorize?"+params,"Cache-Control":"no-store","Set-Cookie":cookie("dd_oauth_state",state+"."+purpose)}});
   }
   if(url.pathname==="/callback"&&request.method==="GET") {
     const state=url.searchParams.get("state"),saved=cookieValue(request,"dd_oauth_state");
     if(!state||!saved||!saved.startsWith(state+".")||!url.searchParams.get("code"))return new Response("Invalid or expired Discord sign-in. Please start again.",{status:403});
-    const purpose=saved.endsWith(".contact")?"contact":"apply";\n    const returnPath=purpose==="contact"?"/remingtonsDD/Partnerships/":"/remingtonsDD/Apply/";\n    const tokenResponse=await fetch("https://discord.com/api/v10/oauth2/token",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams({client_id:env.DISCORD_CLIENT_ID,client_secret:env.DISCORD_CLIENT_SECRET,grant_type:"authorization_code",code:url.searchParams.get("code"),redirect_uri:CALLBACK})});
+    const purpose=saved.endsWith(".contact")?"contact":"apply";
+    const returnPath=purpose==="contact"?"/remingtonsDD/Partnerships/":"/remingtonsDD/Apply/";\n    const tokenResponse=await fetch("https://discord.com/api/v10/oauth2/token",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams({client_id:env.DISCORD_CLIENT_ID,client_secret:env.DISCORD_CLIENT_SECRET,grant_type:"authorization_code",code:url.searchParams.get("code"),redirect_uri:CALLBACK})});
     if(!tokenResponse.ok)return new Response("Discord sign-in failed. Try again.",{status:502});
     const token=await tokenResponse.json();
     const authHeader={Authorization:"Bearer "+token.access_token};
