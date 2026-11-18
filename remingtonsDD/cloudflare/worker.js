@@ -148,11 +148,71 @@ async function botDiagnostics(env) {
   });
   return {ok:checks.every(r=>r.assignable),botName:bot.username,manageRoles:manage,roles:checks};
 }
+
+const ANNOUNCEMENT_CHANNELS={public:"1572372341806338219",staff:"1572372383161909290"};
+const ANNOUNCEMENT_COLLECTION="digitalDenAnnouncements";
+const firestoreRoot="https://firestore.googleapis.com/v1/projects/stucklevel75/databases/(default)/documents";
+const fieldValue=value=>typeof value==="string"?{stringValue:value}:typeof value==="boolean"?{booleanValue:value}:{nullValue:null};
+const fromFields=fields=>Object.fromEntries(Object.entries(fields||{}).map(([k,v])=>[k,v.stringValue??v.booleanValue??null]));
+async function announcementStore(env,path,method="GET",body) {
+ const access=await firebaseToken(env);
+ const response=await fetch(firestoreRoot+"/"+ANNOUNCEMENT_COLLECTION+path,{method,headers:{Authorization:"Bearer "+access,...(body?{"Content-Type":"application/json"}:{})},...(body?{body:JSON.stringify(body)}:{})});
+ if(!response.ok){if(response.status===404)return null;throw Error("Announcement database request failed (HTTP "+response.status+")")}
+ return method==="DELETE"?{}:response.json();
+}
+function announcementData(value) {return {fields:Object.fromEntries(Object.entries(value).map(([k,v])=>[k,fieldValue(v)]))};}
+async function discordAnnouncement(env,channel,id,method,body) {
+ if(!env.DISCORD_BOT_TOKEN)throw Error("Discord bot token is not configured");
+ const response=await fetch("https://discord.com/api/v10/channels/"+ANNOUNCEMENT_CHANNELS[channel]+"/messages"+(id?"/"+encodeURIComponent(id):""),{
+  method,headers:{Authorization:"Bot "+env.DISCORD_BOT_TOKEN,...(body?{"Content-Type":"application/json"}:{})},...(body?{body:JSON.stringify(body)}:{})
+ });
+ if(!response.ok)throw Error("Discord rejected the request (HTTP "+response.status+"). Check channel permissions.");
+ return method==="DELETE"?{}:response.json();
+}
+function discordBody(item) {
+ return {content:item.mention==="everyone"?"@everyone": "",allowed_mentions:{parse:item.mention==="everyone"?["everyone"]:[]},embeds:[{title:item.title,description:item.message,color:0x9d55db,footer:{text:"Remington's Digital Den"}}]};
+}
+async function handleAnnouncement(env,request) {
+ const url=new URL(request.url);
+ const parts=url.pathname.split("/").filter(Boolean),id=parts[2]||"";
+ const method=request.method;
+ if(method==="GET"&&!id){
+  const result=await announcementStore(env,"?pageSize=100");
+  return {items:(result?.documents||[]).map(d=>({id:d.name.split("/").pop(),...fromFields(d.fields)})).sort((a,b)=>(b.updatedAt||"").localeCompare(a.updatedAt||""))};
+ }
+ if(!["POST","PATCH","DELETE"].includes(method))return {error:"Unsupported action",status:405};
+ if(id&&!/^[a-f0-9-]{36}$/.test(id))return {error:"Invalid announcement",status:400};
+ const existing=id?await announcementStore(env,"/"+id):null;
+ if(id&&!existing)return {error:"Announcement not found",status:404};
+ const old=existing?fromFields(existing.fields):null;
+ if(method==="DELETE"){
+  if(old.status==="published"&&old.discordMessageId)await discordAnnouncement(env,old.channel,old.discordMessageId,"DELETE");
+  await announcementStore(env,"/"+id,"DELETE");
+  return {ok:true};
+ }
+ if(Number(request.headers.get("Content-Length")||0)>12000)return {error:"Message too large",status:413};
+ const data=await request.json();
+ const title=typeof data.title==="string"?data.title.trim():"";
+ const message=typeof data.message==="string"?data.message.trim():"";
+ const channel=data.channel,mention=data.mention||"none",action=data.action||"draft";
+ if(!title||title.length>256||!message||message.length>4000||!ANNOUNCEMENT_CHANNELS[channel]||!["none","everyone"].includes(mention)||mention==="everyone"&&channel!=="public"||!["draft","publish"].includes(action))return {error:"Check title, message, channel, and notification",status:400};
+ if(old?.status==="published"&&channel!==old.channel)return {error:"Published announcements cannot change channels",status:400};
+ if(old?.status==="published"&&action==="draft")return {error:"Published announcements cannot become drafts",status:400};
+ const now=new Date().toISOString(),record={title,message,channel,mention,status:action==="publish"?"published":"draft",updatedAt:now,createdAt:old?.createdAt||now,discordMessageId:old?.discordMessageId||""};
+ if(action==="publish"){
+  const sent=await discordAnnouncement(env,channel,old?.discordMessageId||"",(old?.discordMessageId?"PATCH":"POST"),discordBody(record));
+  record.discordMessageId=sent.id;
+ }
+ const target=id||crypto.randomUUID();
+ const stored=await announcementStore(env,"/"+target+(id?"?updateMask.fieldPaths=title&updateMask.fieldPaths=message&updateMask.fieldPaths=channel&updateMask.fieldPaths=mention&updateMask.fieldPaths=status&updateMask.fieldPaths=updatedAt&updateMask.fieldPaths=createdAt&updateMask.fieldPaths=discordMessageId":""),id?"PATCH":"PATCH",announcementData(record));
+ return {ok:true,id:target,item:{...record,id:target}};
+}
+
 export default {
  async fetch(request,env) {
   const url=new URL(request.url),origin=request.headers.get("Origin");
   const cors={"Access-Control-Allow-Origin":ORIGIN,"Vary":"Origin","Access-Control-Allow-Methods":"POST, OPTIONS","Access-Control-Allow-Headers":"Content-Type, Authorization"};
-  if(["/submit","/contact","/admin/bot-check"].includes(url.pathname)&&request.method==="OPTIONS")return new Response(null,{status:204,headers:cors});
+  if((["/submit","/contact","/admin/bot-check"].includes(url.pathname)||url.pathname.startsWith("/admin/announcements"))&&request.method==="OPTIONS")return new Response(null,{status:204,headers:cors});
   if(url.pathname==="/")return new Response("Digital Den Discord verification service is running.");
   if(!env.DISCORD_CLIENT_ID||!env.DISCORD_CLIENT_SECRET||!env.DISCORD_GUILD_ID||!env.SESSION_SIGNING_SECRET||!env.FIREBASE_SERVICE_ACCOUNT)return json({error:"Service not configured"},503);
   if(url.pathname==="/admin/bot-check"&&request.method==="POST") {
@@ -160,6 +220,13 @@ export default {
     const authorization=request.headers.get("Authorization")||"";
     if(!authorization.startsWith("Bearer ")||!await verifyAdminToken(env,authorization.slice(7)))return json({error:"Administrator access required"},403,cors);
     try{return json(await botDiagnostics(env),200,cors)}catch(e){console.error("Bot diagnostics failed",e.message);return json({error:"Could not complete Discord bot checks"},502,cors)}
+  }
+  if(url.pathname.startsWith("/admin/announcements")&&["GET","POST","PATCH","DELETE"].includes(request.method)) {
+    if(origin!==ORIGIN)return json({error:"Invalid origin"},403,cors);
+    const authorization=request.headers.get("Authorization")||"";
+    if(!authorization.startsWith("Bearer ")||!await verifyAdminToken(env,authorization.slice(7)))return json({error:"Administrator access required"},403,cors);
+    try {const result=await handleAnnouncement(env,request);return json(result,result.status||200,cors)}
+    catch(e){console.error("Announcement action failed",e.message);return json({error:e.message||"Announcement request failed"},502,cors)}
   }
   if(url.pathname==="/login"&&request.method==="GET") {
     const state=crypto.randomUUID();
